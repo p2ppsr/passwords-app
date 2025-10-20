@@ -13,8 +13,6 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ToastContainer, toast } from 'react-toastify'
-import 'react-toastify/dist/ReactToastify.css'
 
 import {
   AppBar, Toolbar, Typography, IconButton, Grid, Button, Fab, LinearProgress, TextField,
@@ -103,9 +101,9 @@ function mask(val: string): string {
 
 function copy(text: string) {
   navigator.clipboard.writeText(text).then(() => {
-    toast.dark('Copied to clipboard')
+    alert('Copied to clipboard')
   }).catch(() => {
-    toast.error('Failed to copy')
+    alert('Failed to copy')
   })
 }
 
@@ -262,7 +260,7 @@ const App: React.FC = () => {
     } catch (e: any) {
       const code = e?.code
       if (code !== 'ERR_NO_METANET_IDENTITY') {
-        toast.error(`Failed to load password entries: ${e.message}`)
+        alert(`Failed to load password entries: ${e.message}`)
         console.error(e)
       }
     } finally {
@@ -313,12 +311,12 @@ const App: React.FC = () => {
   const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     try {
-      if (!formTitle.trim()) return toast.error('Enter a title (site / label)')
-      if (!formUsername.trim()) return toast.error('Enter a username')
-      if (!formPassword) return toast.error('Enter a password')
-      if (formSats < 1 || isNaN(formSats)) return toast.error('Amount must be at least 1 satoshi')
+      if (!formTitle.trim()) return alert('Enter a title (site / label)')
+      if (!formUsername.trim()) return alert('Enter a username')
+      if (!formPassword) return alert('Enter a password')
+      if (formSats < 1 || isNaN(formSats)) return alert('Amount must be at least 1 satoshi')
 
-      if (formTotp && !isValidBase32(formTotp)) return toast.error('TOTP secret must be base32')
+      if (formTotp && !isValidBase32(formTotp)) return alert('TOTP secret must be base32')
 
       setCreating(true)
 
@@ -368,9 +366,9 @@ const App: React.FC = () => {
 
       setEntries(prev => [newEntry, ...prev])
       setCreateOpen(false)
-      toast.dark('Password saved')
+      alert('Password saved')
     } catch (e: any) {
-      toast.error(e.message || 'Failed to create password entry')
+      alert(e.message || 'Failed to create password entry')
       console.error(e)
     } finally {
       setCreating(false)
@@ -416,9 +414,9 @@ const App: React.FC = () => {
       setEntries(prev => prev.filter(e => e !== selected))
       setSelected(null)
       setConfirmDeleteOpen(false)
-      toast.dark('Password deleted')
+      alert('Password deleted')
     } catch (e: any) {
-      toast.error(e.message || 'Failed to delete password')
+      alert(e.message || 'Failed to delete password')
       console.error(e)
     } finally {
       setDeleting(false)
@@ -444,11 +442,11 @@ const App: React.FC = () => {
     e.preventDefault()
     if (!selected) return
     try {
-      if (!formTitle.trim()) return toast.error('Enter a title (site / label)')
-      if (!formUsername.trim()) return toast.error('Enter a username')
-      if (!formPassword) return toast.error('Enter a password')
-      if (formTotp && !isValidBase32(formTotp)) return toast.error('TOTP secret must be base32')
-      if (formSats < 1 || isNaN(formSats)) return toast.error('Amount must be at least 1 satoshi')
+      if (!formTitle.trim()) return alert('Enter a title (site / label)')
+      if (!formUsername.trim()) return alert('Enter a username')
+      if (!formPassword) return alert('Enter a password')
+      if (formTotp && !isValidBase32(formTotp)) return alert('TOTP secret must be base32')
+      if (formSats < 1 || isNaN(formSats)) return alert('Amount must be at least 1 satoshi')
 
       setEditing(true)
 
@@ -523,10 +521,10 @@ const App: React.FC = () => {
         setEntries(prev => [newEntry, ...prev.filter(e => e !== selected)])
         setEditOpen(false)
         setSelected(null)
-        toast.dark('Password updated')
+        alert('Password updated')
       }
     } catch (e: any) {
-      toast.error(e.message || 'Failed to update password')
+      alert(e.message || 'Failed to update password')
       console.error(e)
     } finally {
       setEditing(false)
@@ -541,10 +539,10 @@ const App: React.FC = () => {
     if (parsed?.totpSecret) {
       setFormTotp(parsed.totpSecret)
       if (!formTitle && parsed.issuer) setFormTitle(parsed.issuer)
-      toast.dark('TOTP secret captured')
+      alert('TOTP secret captured')
       setQrOpen(false)
     } else {
-      toast.error('Not a valid otpauth:// TOTP QR')
+      alert('Not a valid otpauth:// TOTP QR')
     }
   }
 
@@ -561,7 +559,6 @@ const App: React.FC = () => {
   return (
     <>
       <NoMncModal appName='Metanet Password Manager' open={isMncMissing} onClose={() => setIsMncMissing(false)} />
-      <ToastContainer position='top-right' autoClose={4000} pauseOnHover />
 
       <AppBar position='static'>
         <Toolbar>
