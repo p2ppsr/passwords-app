@@ -117,8 +117,7 @@ const walletClient = new WalletClient()
 
 function mask(val: string): string {
   if (!val) return ''
-  if (val.length <= 4) return '•'.repeat(val.length)
-  return `${'•'.repeat(Math.max(0, val.length - 4))}${val.slice(-4)}`
+  return '•'.repeat(val.length)
 }
 
 function isValidBase32(s: string): boolean {
