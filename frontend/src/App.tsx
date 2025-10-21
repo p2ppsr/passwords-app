@@ -39,7 +39,6 @@ import {
   type WalletOutput, type WalletProtocol
 } from '@bsv/sdk'
 
-import { authenticator } from 'otplib'
 import { QrReader } from 'react-qr-reader'
 
 import './App.scss'
@@ -123,6 +122,63 @@ function mask(val: string): string {
 function isValidBase32(s: string): boolean {
   // Basic sanity; otplib will further validate at use
   return /^[A-Z2-7]+=*$/i.test(s.replace(/\s+/g, ''))
+}
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+
+function base32ToBytes(secret: string): Uint8Array {
+  const clean = secret.replace(/\s+/g, '').toUpperCase().replace(/=+$/, '')
+  let bits = 0
+  let value = 0
+  const output: number[] = []
+
+  for (const char of clean) {
+    const idx = BASE32_ALPHABET.indexOf(char)
+    if (idx === -1) throw new Error('Invalid base32 character')
+    value = (value << 5) | idx
+    bits += 5
+    if (bits >= 8) {
+      bits -= 8
+      output.push((value >> bits) & 0xff)
+    }
+  }
+
+  return new Uint8Array(output)
+}
+
+function getWebCrypto(): SubtleCrypto | null {
+  if (typeof globalThis === 'undefined') return null
+  const cryptoObj = (globalThis as unknown as { crypto?: Crypto }).crypto
+  return cryptoObj?.subtle ?? null
+}
+
+async function generateTotp(secret: string, counter: number, digits = 6, subtle?: SubtleCrypto): Promise<string> {
+  const subtleCrypto = subtle ?? getWebCrypto()
+  if (!subtleCrypto) throw new Error('WebCrypto SubtleCrypto is unavailable')
+
+  const normalizedSecret = secret.replace(/\s+/g, '').toUpperCase()
+  const keyBytes = base32ToBytes(normalizedSecret)
+  if (keyBytes.length === 0) throw new Error('Decoded TOTP secret is empty')
+
+  const algorithm: HmacImportParams = { name: 'HMAC', hash: 'SHA-1' }
+  const cryptoKey = await subtleCrypto.importKey('raw', keyBytes, algorithm, false, ['sign'])
+
+  const buffer = new ArrayBuffer(8)
+  const view = new DataView(buffer)
+  const high = Math.floor(counter / 0x100000000)
+  const low = counter >>> 0
+  view.setUint32(0, high, false)
+  view.setUint32(4, low, false)
+
+  const signature = new Uint8Array(await subtleCrypto.sign(algorithm, cryptoKey, buffer))
+  const offset = signature[signature.length - 1] & 0x0f
+  const binary =
+    ((signature[offset] & 0x7f) << 24) |
+    ((signature[offset + 1] & 0xff) << 16) |
+    ((signature[offset + 2] & 0xff) << 8) |
+    (signature[offset + 3] & 0xff)
+
+  return (binary % 10 ** digits).toString().padStart(digits, '0')
 }
 
 function parseOtpauth(uri: string): Partial<PasswordPayload> | null {
@@ -237,10 +293,57 @@ const App: React.FC = () => {
 
   // TOTP live code handling
   const [tick, setTick] = useState<number>(0) // force re-render each second
+  const [totpCodes, setTotpCodes] = useState<Record<string, { code: string, remaining: number }>>({})
   useEffect(() => {
     const i = setInterval(() => setTick(t => t + 1), 1000)
     return () => clearInterval(i)
   }, [])
+  const fallbackRemaining = useMemo(() => {
+    const step = 30
+    const epochSeconds = Math.floor(Date.now() / 1000)
+    const remainder = epochSeconds % step
+    return remainder === 0 ? step : step - remainder
+  }, [tick])
+  useEffect(() => {
+    let cancelled = false
+    const step = 30
+    const updateTotpCodes = async () => {
+      const subtle = getWebCrypto()
+      const entriesWithTotp = entries.filter(entry => {
+        const secret = entry.payload.totpSecret
+        return Boolean(secret && isValidBase32(secret))
+      })
+
+      if (!subtle || entriesWithTotp.length === 0) {
+        setTotpCodes(prev => (Object.keys(prev).length ? {} : prev))
+        return
+      }
+
+      const epochSeconds = Math.floor(Date.now() / 1000)
+      const remainder = epochSeconds % step
+      const remaining = remainder === 0 ? step : step - remainder
+      const counter = Math.floor(epochSeconds / step)
+
+      const updates = await Promise.all(entriesWithTotp.map(async entry => {
+        try {
+          const code = await generateTotp(entry.payload.totpSecret!, counter, 6, subtle)
+          return [entry.outpoint, { code, remaining }] as const
+        } catch (err) {
+          console.error('Failed to generate TOTP code:', err)
+          return [entry.outpoint, { code: '', remaining: 0 }] as const
+        }
+      }))
+
+      if (!cancelled) {
+        const next = Object.fromEntries(updates) as Record<string, { code: string, remaining: number }>
+        setTotpCodes(next)
+      }
+    }
+
+    void updateTotpCodes()
+
+    return () => { cancelled = true }
+  }, [entries, tick])
 
   // Poll for MetaNet Client (same as your ToDo app)
   useAsyncEffect(() => {
@@ -336,21 +439,6 @@ const App: React.FC = () => {
       return [title, username, issuer, accountName].some(v => v?.toLowerCase().includes(q))
     })
   }, [entries, filter])
-
-  // ----- TOTP helpers -----
-
-  function totpFor(secret?: string) {
-    if (!secret || !isValidBase32(secret)) return { code: '', remaining: 0 }
-    try {
-      const epoch = Math.floor(Date.now() / 1000)
-      const step = 30
-      const remaining = step - (epoch % step)
-      const code = authenticator.generate(secret)
-      return { code, remaining }
-    } catch {
-      return { code: '', remaining: 0 }
-    }
-  }
 
   // ----- Create -----
 
@@ -712,10 +800,14 @@ const App: React.FC = () => {
               >
                 {visible.map((e, i) => {
                   const hasTotp = !!e.payload.totpSecret
-                  const { code, remaining } = hasTotp ? totpFor(e.payload.totpSecret) : { code: '', remaining: 0 }
+                  const totp = hasTotp ? totpCodes[e.outpoint] : undefined
+                  const code = totp?.code ?? ''
+                  const remaining = totp?.remaining ?? (hasTotp ? fallbackRemaining : 0)
                   const entryVisible = Boolean(revealedEntries[e.outpoint])
-                  const displayedCode = vaultVisible && entryVisible ? (code || '••••••') : '••••••'
-                  const displayedCountdown = vaultVisible && entryVisible ? `T-${remaining}s` : 'Hidden'
+                  const displayedCode = vaultVisible && entryVisible ? (code || '------') : '••••••'
+                  const displayedCountdown = vaultVisible && entryVisible
+                    ? (remaining > 0 ? `T-${remaining}s` : 'Unavailable')
+                    : 'Hidden'
                   return (
                     <ListItem
                       key={e.outpoint + i}
