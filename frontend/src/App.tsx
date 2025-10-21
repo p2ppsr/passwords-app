@@ -36,7 +36,8 @@ import useAsyncEffect from 'use-async-effect'
 import { NoMncModal, checkForMetaNetClient } from 'metanet-react-prompt'
 import {
   WalletClient, PushDrop, Utils, Transaction, LockingScript,
-  type WalletOutput, type WalletProtocol
+  type WalletOutput, type WalletProtocol,
+  Random
 } from '@bsv/sdk'
 
 import { QrReader } from 'react-qr-reader'
@@ -45,9 +46,7 @@ import './App.scss'
 
 // ------------- Constants / Protocol -------------
 
-const PASS_PROTO_ADDR = '1PwdMgrSgEwMNetSecureVaultXXXXXXXX' // namespace string; arbitrary label used in PushDrop payload
-const PROTOCOL_ID: WalletProtocol = [0, 'password manager']
-const KEY_ID = '1'
+const PROTOCOL_ID: WalletProtocol = [2, 'password manager']
 const DEFAULT_CREATE_AMOUNT = 1 // sat
 const PASSWORD_BASKET = 'password entries'
 
@@ -103,6 +102,7 @@ type PasswordPayload = {
 export type PasswordEntry = {
   sats: number
   outpoint: string
+  keyID: string
   lockingScript: string
   beef: number[] | undefined
   payload: PasswordPayload
@@ -367,6 +367,7 @@ const App: React.FC = () => {
       const res = await walletClient.listOutputs({
         basket: PASSWORD_BASKET,
         include: 'entire transactions',
+        includeCustomInstructions: true,
         limit: 1000
       })
 
@@ -377,11 +378,12 @@ const App: React.FC = () => {
             const tx = Transaction.fromBEEF(res.BEEF as number[], txid)
             const lockingScript = tx!.outputs[0].lockingScript
             const decoded = PushDrop.decode(lockingScript)
-            const encryptedBlob = decoded.fields[1]
+            const { keyID } = JSON.parse(wo.customInstructions as string)
+            const encryptedBlob = decoded.fields[0]
             const dec = await walletClient.decrypt({
               ciphertext: encryptedBlob,
               protocolID: PROTOCOL_ID,
-              keyID: KEY_ID
+              keyID
             })
             const payload: PasswordPayload = JSON.parse(Utils.toUTF8(dec.plaintext))
 
@@ -390,6 +392,7 @@ const App: React.FC = () => {
               outpoint: `${txid}.0`,
               lockingScript: lockingScript.toHex(),
               beef: res.BEEF,
+              keyID,
               payload
             }
             return entry
@@ -485,26 +488,27 @@ const App: React.FC = () => {
 
       // Prepare PushDrop script
       const pushdrop = new PushDrop(walletClient)
+      const keyID = Utils.toBase64(Random(16))
       const fields = await (async () => {
         const encrypted = (await walletClient.encrypt({
           plaintext: Utils.toArray(JSON.stringify(payload), 'utf8'),
           protocolID: PROTOCOL_ID,
-          keyID: KEY_ID
+          keyID
         })).ciphertext
         return [
-          Utils.toArray(PASS_PROTO_ADDR, 'utf8'),
           encrypted
         ]
       })()
 
-      const lockingScript = await pushdrop.lock(fields, PROTOCOL_ID, KEY_ID, 'self')
+      const lockingScript = await pushdrop.lock(fields, PROTOCOL_ID, keyID, 'self')
 
       const action = await walletClient.createAction({
         outputs: [{
           lockingScript: lockingScript.toHex(),
           satoshis: DEFAULT_CREATE_AMOUNT,
           basket: PASSWORD_BASKET,
-          outputDescription: `Password entry: ${payload.title}`
+          outputDescription: `Password entry: ${payload.title}`,
+          customInstructions: JSON.stringify({ keyID })
         }],
         options: { randomizeOutputs: false, acceptDelayedBroadcast: true },
         description: `Create a password entry for ${payload.title}`
@@ -515,6 +519,7 @@ const App: React.FC = () => {
         outpoint: `${action.txid}.0`,
         lockingScript: lockingScript.toHex(),
         beef: action.tx,
+        keyID,
         payload
       }
 
@@ -540,7 +545,7 @@ const App: React.FC = () => {
     if (!selected) return
     try {
       setDeleting(true)
-      const { beef, sats } = selected
+      const { beef, sats,keyID } = selected
 
       const { signableTransaction } = await walletClient.createAction({
         description: `Delete password: ${selected.payload.title}`,
@@ -556,7 +561,7 @@ const App: React.FC = () => {
       if (!signableTransaction) throw new Error('Failed to create signable transaction')
       const partialTx = Transaction.fromBEEF(signableTransaction.tx)
       const unlocker = new PushDrop(walletClient).unlock(
-        PROTOCOL_ID, KEY_ID, 'self', 'all', false, sats, LockingScript.fromHex(selected.lockingScript)
+        PROTOCOL_ID, keyID, 'self', 'all', false, sats, LockingScript.fromHex(selected.lockingScript)
       )
       const unlockingScript = await unlocker.sign(partialTx, 0)
 
@@ -621,32 +626,9 @@ const App: React.FC = () => {
       setEditing(true)
       const satoshiAmount = selected.sats ?? DEFAULT_CREATE_AMOUNT
 
-      // 1) Spend old
+      // First create new to ensure data will persist before deleting old
       {
-        const { signableTransaction } = await walletClient.createAction({
-          description: `Update password (spend old): ${selected.payload.title}`,
-          inputBEEF: selected.beef,
-          inputs: [{
-            inputDescription: 'Spend old password entry',
-            outpoint: selected.outpoint,
-            unlockingScriptLength: 73
-          }],
-          options: { acceptDelayedBroadcast: true, randomizeOutputs: false }
-        })
-        if (!signableTransaction) throw new Error('Failed to create signable transaction (edit/spend)')
-        const partialTx = Transaction.fromBEEF(signableTransaction.tx)
-        const unlocker = new PushDrop(walletClient).unlock(
-          PROTOCOL_ID, KEY_ID, 'self', 'all', false, selected.sats, LockingScript.fromHex(selected.lockingScript)
-        )
-        const unlockingScript = await unlocker.sign(partialTx, 0)
-        await walletClient.signAction({
-          reference: signableTransaction.reference,
-          spends: { 0: { unlockingScript: unlockingScript.toHex() } }
-        })
-      }
-
-      // 2) Create new
-      {
+        const keyID = Utils.toBase64(Random(16))
         const now = new Date().toISOString()
         const payload: PasswordPayload = {
           title: formTitle.trim(),
@@ -661,12 +643,12 @@ const App: React.FC = () => {
         const encrypted = (await walletClient.encrypt({
           plaintext: Utils.toArray(JSON.stringify(payload), 'utf8'),
           protocolID: PROTOCOL_ID,
-          keyID: KEY_ID
+          keyID,
         })).ciphertext
 
         const lockingScript = await pushdrop.lock(
-          [Utils.toArray(PASS_PROTO_ADDR, 'utf8'), encrypted],
-          PROTOCOL_ID, KEY_ID, 'self'
+          [encrypted],
+          PROTOCOL_ID, keyID, 'self'
         )
 
         const action = await walletClient.createAction({
@@ -674,6 +656,7 @@ const App: React.FC = () => {
             lockingScript: lockingScript.toHex(),
             satoshis: satoshiAmount,
             basket: PASSWORD_BASKET,
+            customInstructions: JSON.stringify({ keyID }),
             outputDescription: `Password entry (updated): ${payload.title}`
           }],
           options: { randomizeOutputs: false, acceptDelayedBroadcast: true },
@@ -686,6 +669,7 @@ const App: React.FC = () => {
           outpoint: `${action.txid}.0`,
           lockingScript: lockingScript.toHex(),
           beef: action.tx,
+          keyID,
           payload
         }
 
@@ -699,6 +683,30 @@ const App: React.FC = () => {
           return next
         })
         showToast('Password updated', 'success')
+      }
+
+      // Now spend old, do not link transactions together for security
+      {
+        const { signableTransaction } = await walletClient.createAction({
+          description: `Update password (spend old): ${selected.payload.title}`,
+          inputBEEF: selected.beef,
+          inputs: [{
+            inputDescription: 'Spend old password entry',
+            outpoint: selected.outpoint,
+            unlockingScriptLength: 73
+          }],
+          options: { acceptDelayedBroadcast: true, randomizeOutputs: false }
+        })
+        if (!signableTransaction) throw new Error('Failed to create signable transaction (edit/spend)')
+        const partialTx = Transaction.fromBEEF(signableTransaction.tx)
+        const unlocker = new PushDrop(walletClient).unlock(
+          PROTOCOL_ID, selected.keyID, 'self', 'all', false, selected.sats, LockingScript.fromHex(selected.lockingScript)
+        )
+        const unlockingScript = await unlocker.sign(partialTx, 0)
+        await walletClient.signAction({
+          reference: signableTransaction.reference,
+          spends: { 0: { unlockingScript: unlockingScript.toHex() } }
+        })
       }
     } catch (e: any) {
       showToast(e.message || 'Failed to update password', 'error')
