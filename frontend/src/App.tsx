@@ -1108,6 +1108,34 @@ const App: React.FC = () => {
           <Button onClick={() => setQrOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+
+      <Box
+        component='footer'
+        sx={{
+          px: small ? 1.5 : 3,
+          py: small ? 2 : 3,
+          bgcolor: theme => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)'
+        }}
+      >
+        <Typography variant='subtitle2' gutterBottom>
+          Legal Notice &amp; Liability Disclaimer
+        </Typography>
+        <Typography variant='body2' color='textSecondary' paragraph>
+          Metanet Password Manager is distributed under the Open BSV License strictly on an "AS IS" basis.
+          To the maximum extent permitted by applicable law, the authors, maintainers, and contributors
+          expressly disclaim all warranties and conditions of any kind, whether express or implied,
+          including but not limited to merchantability, fitness for a particular purpose, non-infringement,
+          data security, and uninterrupted or error-free operation.
+        </Typography>
+        <Typography variant='body2' color='textSecondary'>
+          You assume all risk for your use of this software. Under no circumstances shall the authors,
+          maintainers, contributors, or rights holders be liable for any direct, indirect, incidental,
+          special, exemplary, or consequential damages, losses, or claims arising from or in connection
+          with the software, your data, your credentials, or any transaction performed with it, even if
+          advised of the possibility of such damages. By continuing, you acknowledge that you have read,
+          understood, and agree to the Open BSV License and this full waiver of liability.
+        </Typography>
+      </Box>
       <Snackbar
         open={Boolean(toast)}
         autoHideDuration={4000}
