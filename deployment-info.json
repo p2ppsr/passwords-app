@@ -7,29 +7,10 @@
   },
   "configs": [
     {
-      "name": "Local LARS",
-      "network": "mainnet",
-      "provider": "LARS",
-      "run": [
-        "frontend"
-      ]
-    },
-    {
       "name": "Babbage",
       "provider": "CARS",
       "CARSCloudURL": "https://cars.babbage.systems",
-      "projectID": "3e7307ac6d758bf0f0d6f76ed5b08286",
-      "network": "mainnet",
-      "deploy": [
-        "frontend"
-      ],
-      "frontendHostingMethod": "HTTPS"
-    },
-    {
-      "name": "ClubCFG",
-      "provider": "CARS",
-      "CARSCloudURL": "https://cars.metanet.club",
-      "projectID": "0208902985854f45f08da4053e32843f",
+      "projectID": "dd594f7dce4cd99203138d3572d40354",
       "network": "mainnet",
       "deploy": [
         "frontend"

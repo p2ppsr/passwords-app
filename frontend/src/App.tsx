@@ -12,13 +12,13 @@
  * Protocol IDs used: [0, 'password manager'] with keyID '1'
  */
 
-import React, { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 
 import {
   AppBar, Toolbar, Typography, IconButton, Grid, Button, Fab, LinearProgress, TextField,
   Dialog, DialogTitle, DialogContent, DialogActions, DialogContentText, List, ListItem,
-  ListItemText, ListItemIcon, Checkbox, InputAdornment, useMediaQuery, Menu, MenuItem,
-  Chip, Box, Tooltip
+  InputAdornment, useMediaQuery, Menu, MenuItem,
+  Chip, Box, Tooltip, Snackbar, Alert, type AlertColor
 } from '@mui/material'
 import { styled } from '@mui/system'
 import AddIcon from '@mui/icons-material/Add'
@@ -64,7 +64,29 @@ const AddMoreFab = styled(Fab)({
 const LoadingBar = styled(LinearProgress)({ margin: '1em' })
 const GitHubIconStyle = styled(IconButton)({ color: '#ffffff' })
 const NoItems = styled(Grid)({ margin: 'auto', textAlign: 'center', marginTop: '5em' })
-const Row = styled('div')({ display: 'flex', gap: '0.75rem', alignItems: 'center' })
+const PasswordCard = styled(Box)(({ theme }) => ({
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.75rem',
+  width: '100%',
+  borderRadius: '12px',
+  border: `1px solid ${theme.palette.divider}`,
+  padding: theme.spacing(2),
+  backgroundColor: theme.palette.mode === 'dark' ? theme.palette.background.paper : '#ffffff',
+  boxShadow: theme.shadows[1],
+  transition: 'box-shadow 120ms ease, transform 120ms ease',
+  '&:hover': {
+    boxShadow: theme.shadows[4],
+    transform: 'translateY(-2px)'
+  }
+}))
+const PasswordValue = styled('span')(({ theme }) => ({
+  fontFamily: 'monospace',
+  letterSpacing: '0.08em',
+  padding: '0.25rem 0.5rem',
+  borderRadius: '0.5rem',
+  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.06)'
+}))
 
 // ------------- Types -------------
 
@@ -97,14 +119,6 @@ function mask(val: string): string {
   if (!val) return ''
   if (val.length <= 4) return '•'.repeat(val.length)
   return `${'•'.repeat(Math.max(0, val.length - 4))}${val.slice(-4)}`
-}
-
-function copy(text: string) {
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Copied to clipboard')
-  }).catch(() => {
-    alert('Failed to copy')
-  })
 }
 
 function isValidBase32(s: string): boolean {
@@ -142,18 +156,6 @@ function parseOtpauth(uri: string): Partial<PasswordPayload> | null {
   }
 }
 
-const buildEncryptedFields = async (
-  payload: PasswordPayload
-): Promise<number[]> => {
-  const encrypted = (await walletClient.encrypt({
-    plaintext: Utils.toArray(JSON.stringify(payload), 'utf8'),
-    protocolID: PROTOCOL_ID,
-    keyID: KEY_ID
-  })).ciphertext
-  // PushDrop fields; first is protocol namespace marker, second is encrypted blob
-  return [Utils.toArray(PASS_PROTO_ADDR, 'utf8') as unknown as number[], encrypted].flat() as unknown as number[]
-}
-
 // ------------- Main Component -------------
 
 const App: React.FC = () => {
@@ -185,13 +187,54 @@ const App: React.FC = () => {
   const [formUsername, setFormUsername] = useState<string>('')
   const [formPassword, setFormPassword] = useState<string>('')
   const [formTotp, setFormTotp] = useState<string>('') // base32
-  const [formSats, setFormSats] = useState<number>(DEFAULT_CREATE_AMOUNT)
 
   // UI toggles
-  const [revealPassword, setRevealPassword] = useState<boolean>(false)
+  const [vaultVisible, setVaultVisible] = useState<boolean>(false)
+  const [revealedEntries, setRevealedEntries] = useState<Record<string, boolean>>({})
+  const [formPasswordVisible, setFormPasswordVisible] = useState<boolean>(false)
+  const [toast, setToast] = useState<{ message: string, severity: AlertColor } | null>(null)
 
   // Responsive layout
   const small = useMediaQuery('(max-width:600px)')
+
+  const showToast = useCallback((message: string, severity: AlertColor = 'info') => {
+    setToast({ message, severity })
+  }, [])
+
+  const handleToastClose = useCallback((_: React.SyntheticEvent | Event, reason?: string) => {
+    if (reason === 'clickaway') return
+    setToast(null)
+  }, [])
+
+  const handleCopy = useCallback((text: string, successMessage: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(successMessage, 'success')
+    }).catch(() => {
+      showToast('Failed to copy to clipboard', 'error')
+    })
+  }, [showToast])
+
+  const toggleVaultVisibility = useCallback(() => {
+    setVaultVisible(prev => {
+      const next = !prev
+      if (!next) setRevealedEntries({})
+      return next
+    })
+  }, [setRevealedEntries])
+
+  const showVault = useCallback(() => {
+    setVaultVisible(true)
+  }, [])
+
+  const toggleEntryVisibility = useCallback((id: string) => {
+    if (!vaultVisible) return
+    setRevealedEntries(prev => {
+      const next = { ...prev }
+      if (next[id]) delete next[id]
+      else next[id] = true
+      return next
+    })
+  }, [vaultVisible])
 
   // TOTP live code handling
   const [tick, setTick] = useState<number>(0) // force re-render each second
@@ -257,10 +300,24 @@ const App: React.FC = () => {
 
       const filtered = (results.filter(Boolean) as PasswordEntry[]).reverse()
       setEntries(filtered)
+      setRevealedEntries(prev => {
+        if (!Object.keys(prev).length) return prev
+        const valid = new Set(filtered.map(f => f.outpoint))
+        let mutated = false
+        const next: Record<string, boolean> = {}
+        for (const key of Object.keys(prev)) {
+          if (valid.has(key)) {
+            next[key] = true
+          } else {
+            mutated = true
+          }
+        }
+        return mutated ? next : prev
+      })
     } catch (e: any) {
       const code = e?.code
       if (code !== 'ERR_NO_METANET_IDENTITY') {
-        alert(`Failed to load password entries: ${e.message}`)
+        showToast(`Failed to load password entries: ${e.message}`, 'error')
         console.error(e)
       }
     } finally {
@@ -303,20 +360,30 @@ const App: React.FC = () => {
     setFormUsername('')
     setFormPassword('')
     setFormTotp('')
-    setFormSats(DEFAULT_CREATE_AMOUNT)
-    setRevealPassword(false)
+    setFormPasswordVisible(false)
     setCreateOpen(true)
   }
 
   const handleCreate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     try {
-      if (!formTitle.trim()) return alert('Enter a title (site / label)')
-      if (!formUsername.trim()) return alert('Enter a username')
-      if (!formPassword) return alert('Enter a password')
-      if (formSats < 1 || isNaN(formSats)) return alert('Amount must be at least 1 satoshi')
+      if (!formTitle.trim()) {
+        showToast('Enter a title (site / label)', 'warning')
+        return
+      }
+      if (!formUsername.trim()) {
+        showToast('Enter a username', 'warning')
+        return
+      }
+      if (!formPassword) {
+        showToast('Enter a password', 'warning')
+        return
+      }
 
-      if (formTotp && !isValidBase32(formTotp)) return alert('TOTP secret must be base32')
+      if (formTotp && !isValidBase32(formTotp)) {
+        showToast('TOTP secret must be base32', 'warning')
+        return
+      }
 
       setCreating(true)
 
@@ -348,7 +415,7 @@ const App: React.FC = () => {
       const action = await walletClient.createAction({
         outputs: [{
           lockingScript: lockingScript.toHex(),
-          satoshis: Number(formSats),
+          satoshis: DEFAULT_CREATE_AMOUNT,
           basket: PASSWORD_BASKET,
           outputDescription: `Password entry: ${payload.title}`
         }],
@@ -357,7 +424,7 @@ const App: React.FC = () => {
       })
 
       const newEntry: PasswordEntry = {
-        sats: Number(formSats),
+        sats: DEFAULT_CREATE_AMOUNT,
         outpoint: `${action.txid}.0`,
         lockingScript: lockingScript.toHex(),
         beef: action.tx,
@@ -366,9 +433,9 @@ const App: React.FC = () => {
 
       setEntries(prev => [newEntry, ...prev])
       setCreateOpen(false)
-      alert('Password saved')
+      showToast('Password saved', 'success')
     } catch (e: any) {
-      alert(e.message || 'Failed to create password entry')
+      showToast(e.message || 'Failed to create password entry', 'error')
       console.error(e)
     } finally {
       setCreating(false)
@@ -412,11 +479,17 @@ const App: React.FC = () => {
       })
 
       setEntries(prev => prev.filter(e => e !== selected))
+      setRevealedEntries(prev => {
+        if (!prev[selected.outpoint]) return prev
+        const next = { ...prev }
+        delete next[selected.outpoint]
+        return next
+      })
       setSelected(null)
       setConfirmDeleteOpen(false)
-      alert('Password deleted')
+      showToast('Password deleted', 'success')
     } catch (e: any) {
-      alert(e.message || 'Failed to delete password')
+      showToast(e.message || 'Failed to delete password', 'error')
       console.error(e)
     } finally {
       setDeleting(false)
@@ -433,8 +506,7 @@ const App: React.FC = () => {
     setFormUsername(entry.payload.username)
     setFormPassword(entry.payload.password)
     setFormTotp(entry.payload.totpSecret || '')
-    setFormSats(entry.sats || DEFAULT_CREATE_AMOUNT)
-    setRevealPassword(false)
+    setFormPasswordVisible(false)
     setEditOpen(true)
   }
 
@@ -442,13 +514,25 @@ const App: React.FC = () => {
     e.preventDefault()
     if (!selected) return
     try {
-      if (!formTitle.trim()) return alert('Enter a title (site / label)')
-      if (!formUsername.trim()) return alert('Enter a username')
-      if (!formPassword) return alert('Enter a password')
-      if (formTotp && !isValidBase32(formTotp)) return alert('TOTP secret must be base32')
-      if (formSats < 1 || isNaN(formSats)) return alert('Amount must be at least 1 satoshi')
+      if (!formTitle.trim()) {
+        showToast('Enter a title (site / label)', 'warning')
+        return
+      }
+      if (!formUsername.trim()) {
+        showToast('Enter a username', 'warning')
+        return
+      }
+      if (!formPassword) {
+        showToast('Enter a password', 'warning')
+        return
+      }
+      if (formTotp && !isValidBase32(formTotp)) {
+        showToast('TOTP secret must be base32', 'warning')
+        return
+      }
 
       setEditing(true)
+      const satoshiAmount = selected.sats ?? DEFAULT_CREATE_AMOUNT
 
       // 1) Spend old
       {
@@ -501,7 +585,7 @@ const App: React.FC = () => {
         const action = await walletClient.createAction({
           outputs: [{
             lockingScript: lockingScript.toHex(),
-            satoshis: Number(formSats),
+            satoshis: satoshiAmount,
             basket: PASSWORD_BASKET,
             outputDescription: `Password entry (updated): ${payload.title}`
           }],
@@ -511,7 +595,7 @@ const App: React.FC = () => {
 
         // Replace in local state
         const newEntry: PasswordEntry = {
-          sats: Number(formSats),
+          sats: satoshiAmount,
           outpoint: `${action.txid}.0`,
           lockingScript: lockingScript.toHex(),
           beef: action.tx,
@@ -521,10 +605,16 @@ const App: React.FC = () => {
         setEntries(prev => [newEntry, ...prev.filter(e => e !== selected)])
         setEditOpen(false)
         setSelected(null)
-        alert('Password updated')
+        setRevealedEntries(prev => {
+          if (!prev[selected.outpoint]) return prev
+          const next = { ...prev }
+          delete next[selected.outpoint]
+          return next
+        })
+        showToast('Password updated', 'success')
       }
     } catch (e: any) {
-      alert(e.message || 'Failed to update password')
+      showToast(e.message || 'Failed to update password', 'error')
       console.error(e)
     } finally {
       setEditing(false)
@@ -539,10 +629,10 @@ const App: React.FC = () => {
     if (parsed?.totpSecret) {
       setFormTotp(parsed.totpSecret)
       if (!formTitle && parsed.issuer) setFormTitle(parsed.issuer)
-      alert('TOTP secret captured')
+      showToast('TOTP secret captured', 'success')
       setQrOpen(false)
     } else {
-      alert('Not a valid otpauth:// TOTP QR')
+      showToast('Not a valid otpauth:// TOTP QR', 'error')
     }
   }
 
@@ -565,7 +655,12 @@ const App: React.FC = () => {
           <Typography variant='h6' component='div' sx={{ flexGrow: 1 }}>
             Metanet Password Manager
           </Typography>
-          <GitHubIconStyle onClick={() => window.open('https://github.com/p2ppsr/todo-ts', '_blank')}>
+          <Tooltip title={vaultVisible ? 'Hide vault details' : 'Show vault details'}>
+            <IconButton color='inherit' onClick={toggleVaultVisibility}>
+              {vaultVisible ? <VisibilityOffIcon /> : <VisibilityIcon />}
+            </IconButton>
+          </Tooltip>
+          <GitHubIconStyle onClick={() => window.open('https://github.com/p2ppsr/passwords-app', '_blank')}>
             <GitHubIcon />
           </GitHubIconStyle>
         </Toolbar>
@@ -604,89 +699,140 @@ const App: React.FC = () => {
               </Grid>
             </NoItems>
           ) : (
-            <List dense={small}>
-              {visible.map((e, i) => {
-                const hasTotp = !!e.payload.totpSecret
-                const { code, remaining } = hasTotp ? totpFor(e.payload.totpSecret) : { code: '', remaining: 0 }
-                return (
-                  <ListItem
-                    key={e.outpoint + i}
-                    sx={{
-                      borderBottom: '1px solid rgba(0,0,0,0.06)',
-                      alignItems: 'flex-start',
-                      py: small ? 1 : 1.5
-                    }}
-                    secondaryAction={
-                      <>
-                        <Tooltip title="More">
-                          <IconButton edge='end' onClick={(ev) => openMenu(ev, e)}><MoreVertIcon /></IconButton>
-                        </Tooltip>
-                      </>
-                    }
-                  >
-                    <ListItemIcon sx={{ minWidth: 40 }}>
-                      <Checkbox edge='start' tabIndex={-1} disableRipple checked={hasTotp} />
-                    </ListItemIcon>
-
-                    <ListItemText
-                      primary={
-                        <Row>
-                          <Typography variant='subtitle1' sx={{ fontWeight: 600 }}>{e.payload.title}</Typography>
-                          {hasTotp && (
-                            <Chip
-                              size='small'
-                              label={code || '••••••'}
-                              variant='outlined'
-                            />
-                          )}
-                          {hasTotp && (
-                            <Chip
-                              size='small'
-                              label={`T-${remaining}s`}
-                            />
-                          )}
-                          <Chip size='small' label={`${e.sats} sats`} />
-                        </Row>
-                      }
-                      secondary={
-                        <Box sx={{ mt: 0.5 }}>
-                          <Row>
-                            <Typography variant='body2' color='textSecondary'>
-                              {e.payload.username}
-                            </Typography>
-                            <Tooltip title={revealPassword ? 'Hide password' : 'Show password'}>
-                              <IconButton size='small' onClick={() => setRevealPassword(v => !v)}>
-                                {revealPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+            <Box sx={{ position: 'relative' }}>
+              <List
+                dense={small}
+                sx={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: small ? 1 : 2,
+                  filter: vaultVisible ? 'none' : 'blur(8px)',
+                  pointerEvents: vaultVisible ? 'auto' : 'none',
+                  transition: 'filter 120ms ease'
+                }}
+              >
+                {visible.map((e, i) => {
+                  const hasTotp = !!e.payload.totpSecret
+                  const { code, remaining } = hasTotp ? totpFor(e.payload.totpSecret) : { code: '', remaining: 0 }
+                  const entryVisible = Boolean(revealedEntries[e.outpoint])
+                  const displayedCode = vaultVisible && entryVisible ? (code || '••••••') : '••••••'
+                  const displayedCountdown = vaultVisible && entryVisible ? `T-${remaining}s` : 'Hidden'
+                  return (
+                    <ListItem
+                      key={e.outpoint + i}
+                      disableGutters
+                      sx={{ px: 0 }}
+                    >
+                      <PasswordCard>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
+                          <Typography variant='subtitle1' sx={{ fontWeight: 600 }}>
+                            {e.payload.title}
+                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                            {hasTotp && (
+                              <>
+                                <Chip
+                                  size='small'
+                                  label={displayedCode}
+                                  variant='outlined'
+                                />
+                                <Chip
+                                  size='small'
+                                  label={displayedCountdown}
+                                />
+                              </>
+                            )}
+                            <Tooltip title={entryVisible ? 'Hide password' : 'Show password'}>
+                              <span>
+                                <IconButton
+                                  size='small'
+                                  onClick={() => toggleEntryVisibility(e.outpoint)}
+                                  disabled={!vaultVisible}
+                                >
+                                  {entryVisible ? <VisibilityOffIcon fontSize='small' /> : <VisibilityIcon fontSize='small' />}
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title='More options'>
+                              <IconButton size='small' onClick={(ev) => openMenu(ev, e)}>
+                                <MoreVertIcon fontSize='small' />
                               </IconButton>
                             </Tooltip>
-                            <Typography variant='body2' sx={{ fontFamily: 'monospace' }}>
-                              {revealPassword ? e.payload.password : mask(e.payload.password)}
-                            </Typography>
-                            <Tooltip title='Copy password'>
-                              <IconButton size='small' onClick={() => copy(e.payload.password)}>
+                          </Box>
+                        </Box>
+                        <Typography variant='body2' color='textSecondary'>
+                          {e.payload.username}
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
+                          <PasswordValue>
+                            {vaultVisible && entryVisible ? e.payload.password : mask(e.payload.password)}
+                          </PasswordValue>
+                          <Tooltip title={vaultVisible && entryVisible ? 'Copy password' : 'Reveal password to copy'}>
+                            <span>
+                              <IconButton
+                                size='small'
+                                onClick={() => handleCopy(e.payload.password, 'Password copied')}
+                                disabled={!(vaultVisible && entryVisible)}
+                              >
                                 <ContentCopyIcon fontSize='small' />
                               </IconButton>
-                            </Tooltip>
-                            {hasTotp && code && (
-                              <Tooltip title='Copy TOTP code'>
-                                <IconButton size='small' onClick={() => copy(code)}>
+                            </span>
+                          </Tooltip>
+                          {hasTotp && (
+                            <Tooltip title={vaultVisible && entryVisible ? 'Copy TOTP code' : 'Reveal password to copy'}>
+                              <span>
+                                <IconButton
+                                  size='small'
+                                  onClick={() => handleCopy(code, 'TOTP code copied')}
+                                  disabled={!(vaultVisible && entryVisible && code)}
+                                >
                                   <ContentCopyIcon fontSize='small' />
                                 </IconButton>
-                              </Tooltip>
-                            )}
-                          </Row>
-                          {(e.payload.issuer || e.payload.accountName) && (
-                            <Typography variant='caption' color='textSecondary'>
-                              {e.payload.issuer ? `${e.payload.issuer} • ` : ''}{e.payload.accountName || ''}
-                            </Typography>
+                              </span>
+                            </Tooltip>
                           )}
                         </Box>
-                      }
-                    />
-                  </ListItem>
-                )
-              })}
-            </List>
+                        {(e.payload.issuer || e.payload.accountName) && (
+                          <Typography variant='caption' color='textSecondary'>
+                            {e.payload.issuer ? `${e.payload.issuer} • ` : ''}{e.payload.accountName || ''}
+                          </Typography>
+                        )}
+                      </PasswordCard>
+                    </ListItem>
+                  )
+                })}
+              </List>
+              {!vaultVisible && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    gap: 2,
+                    px: 3,
+                    py: 6,
+                    borderRadius: 2,
+                    bgcolor: theme => theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.76)',
+                    backdropFilter: 'blur(2px)'
+                  }}
+                >
+                  <Typography variant='h6'>Vault hidden</Typography>
+                  <Typography
+                    variant='body2'
+                    sx={{ color: theme => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.75)' : 'rgba(30,41,59,0.7)' }}
+                  >
+                    Tap show to reveal your stored passwords.
+                  </Typography>
+                  <Button variant='contained' startIcon={<VisibilityIcon />} onClick={showVault}>
+                    Show vault
+                  </Button>
+                </Box>
+              )}
+            </Box>
           )}
         </>
       )}
@@ -728,12 +874,12 @@ const App: React.FC = () => {
                   fullWidth
                   value={formPassword}
                   onChange={e => setFormPassword(e.target.value)}
-                  type={revealPassword ? 'text' : 'password'}
+                  type={formPasswordVisible ? 'text' : 'password'}
                   InputProps={{
                     endAdornment: (
                       <InputAdornment position='end'>
-                        <IconButton onClick={() => setRevealPassword(v => !v)}>
-                          {revealPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                        <IconButton onClick={() => setFormPasswordVisible(v => !v)}>
+                          {formPasswordVisible ? <VisibilityOffIcon /> : <VisibilityIcon />}
                         </IconButton>
                       </InputAdornment>
                     )
@@ -759,16 +905,6 @@ const App: React.FC = () => {
                 >
                   Scan QR
                 </Button>
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  type='number'
-                  inputProps={{ min: 1 }}
-                  label='Amount to lock (sats)'
-                  value={formSats}
-                  onChange={(e) => setFormSats(Number(e.target.value))}
-                />
               </Grid>
             </Grid>
           </DialogContent>
@@ -799,12 +935,12 @@ const App: React.FC = () => {
                   fullWidth
                   value={formPassword}
                   onChange={e => setFormPassword(e.target.value)}
-                  type={revealPassword ? 'text' : 'password'}
+                  type={formPasswordVisible ? 'text' : 'password'}
                   InputProps={{
                     endAdornment: (
                       <InputAdornment position='end'>
-                        <IconButton onClick={() => setRevealPassword(v => !v)}>
-                          {revealPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                        <IconButton onClick={() => setFormPasswordVisible(v => !v)}>
+                          {formPasswordVisible ? <VisibilityOffIcon /> : <VisibilityIcon />}
                         </IconButton>
                       </InputAdornment>
                     )
@@ -831,16 +967,6 @@ const App: React.FC = () => {
                   Scan QR
                 </Button>
               </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  type='number'
-                  inputProps={{ min: 1 }}
-                  label='Amount to lock (sats)'
-                  value={formSats}
-                  onChange={(e) => setFormSats(Number(e.target.value))}
-                />
-              </Grid>
             </Grid>
           </DialogContent>
           {editing ? <LoadingBar /> : (
@@ -857,7 +983,7 @@ const App: React.FC = () => {
         <DialogTitle>Delete “{selected?.payload.title}”?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This spends the entry’s token and removes it from the basket. Your locked satoshis are returned to you.
+            This removes the saved password from your vault.
           </DialogContentText>
         </DialogContent>
         {deleting ? <LoadingBar /> : (
@@ -891,6 +1017,18 @@ const App: React.FC = () => {
           <Button onClick={() => setQrOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={4000}
+        onClose={handleToastClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        {toast ? (
+          <Alert onClose={handleToastClose} severity={toast.severity} variant='filled' sx={{ width: '100%' }}>
+            {toast.message}
+          </Alert>
+        ) : null}
+      </Snackbar>
     </>
   )
 }
