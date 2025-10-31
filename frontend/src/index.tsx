@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom'
 import { CssBaseline } from '@mui/material'
 import { ThemeProvider } from '@mui/material/styles'
 import App from './App'
-import web3Theme from './theme'
+import vaultTheme from './theme'
 
 const rootElement = document.getElementById('root')
 
@@ -12,7 +12,7 @@ if (rootElement === null) {
 }
 
 ReactDOM.render(
-  <ThemeProvider theme={web3Theme}>
+  <ThemeProvider theme={vaultTheme}>
     <CssBaseline />
     <App />
   </ThemeProvider>,

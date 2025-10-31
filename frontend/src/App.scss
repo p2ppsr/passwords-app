@@ -1,3 +1,8 @@
 a {
-  color:lightseagreen
+  color: #4ef18d;
+  text-decoration-color: rgba(78, 241, 141, 0.35);
+}
+
+a:hover {
+  text-decoration-color: rgba(78, 241, 141, 0.8);
 }

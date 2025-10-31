@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 /**
- * Metanet Password Manager (BSV / PushDrop / BRC100)
+ * Passkey Vault (BSV / PushDrop / BRC100)
  *
  * Core ideas:
  * - Each password entry is a PushDrop output locked to the current user
@@ -18,9 +18,10 @@ import {
   AppBar, Toolbar, Typography, IconButton, Grid, Button, Fab, LinearProgress, TextField,
   Dialog, DialogTitle, DialogContent, DialogActions, DialogContentText, List, ListItem,
   InputAdornment, useMediaQuery, Menu, MenuItem,
-  Chip, Box, Tooltip, Snackbar, Alert, type AlertColor
+  Chip, Box, Tooltip, Snackbar, Alert, Paper, Stack, type AlertColor
 } from '@mui/material'
 import { styled } from '@mui/system'
+import { alpha } from '@mui/material/styles'
 import AddIcon from '@mui/icons-material/Add'
 import GitHubIcon from '@mui/icons-material/GitHub'
 import VisibilityIcon from '@mui/icons-material/Visibility'
@@ -39,6 +40,7 @@ import {
   type WalletOutput, type WalletProtocol,
   Random
 } from '@bsv/sdk'
+import BabbageGo from '@babbage/go'
 
 import { QrReader } from 'react-qr-reader'
 
@@ -52,38 +54,95 @@ const PASSWORD_BASKET = 'password entries'
 
 // ------------- Styling -------------
 
-const AppBarPlaceholder = styled('div')({ height: '4em' })
-const AddMoreFab = styled(Fab)({
+const AppBarPlaceholder = styled('div')(({ theme }) => ({
+  ...theme.mixins.toolbar,
+  marginBottom: theme.spacing(3)
+}))
+const Shell = styled('div')(({ theme }) => ({
+  maxWidth: '1120px',
+  margin: '0 auto',
+  width: '100%',
+  padding: theme.spacing(5, 4, 10),
+  [theme.breakpoints.down('md')]: {
+    padding: theme.spacing(4, 3, 8)
+  },
+  [theme.breakpoints.down('sm')]: {
+    padding: theme.spacing(3, 2, 7)
+  }
+}))
+const AddMoreFab = styled(Fab)(({ theme }) => ({
   position: 'fixed',
-  right: '1em',
-  bottom: '1em',
-  zIndex: 10
-})
-const LoadingBar = styled(LinearProgress)({ margin: '1em' })
-const GitHubIconStyle = styled(IconButton)({ color: '#ffffff' })
-const NoItems = styled(Grid)({ margin: 'auto', textAlign: 'center', marginTop: '5em' })
+  right: theme.spacing(2),
+  bottom: theme.spacing(2.5),
+  zIndex: 10,
+  boxShadow: '0 18px 40px rgba(80, 231, 163, 0.35)'
+}))
+const LoadingBar = styled(LinearProgress)(({ theme }) => ({
+  margin: theme.spacing(1.5, 0)
+}))
+const GitHubIconStyle = styled(IconButton)(({ theme }) => ({
+  color: theme.palette.text.primary,
+  backgroundColor: alpha(theme.palette.common.white, 0.08),
+  borderRadius: theme.shape.borderRadius,
+  '&:hover': {
+    backgroundColor: alpha(theme.palette.common.white, 0.16)
+  }
+}))
+const HeroCard = styled(Paper)(({ theme }) => ({
+  padding: theme.spacing(4),
+  borderRadius: theme.shape.borderRadius * 1.25,
+  background: 'linear-gradient(135deg, rgba(80, 231, 163, 0.12) 0%, rgba(59, 130, 246, 0.08) 100%)',
+  border: `1px solid ${alpha(theme.palette.primary.light, 0.35)}`,
+  boxShadow: '0 32px 120px rgba(15, 34, 60, 0.45)',
+  backdropFilter: 'blur(20px)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: theme.spacing(2.5),
+  [theme.breakpoints.down('sm')]: {
+    padding: theme.spacing(3)
+  }
+}))
+const SearchSurface = styled(Paper)(({ theme }) => ({
+  padding: theme.spacing(3),
+  borderRadius: theme.shape.borderRadius * 1.1,
+  backgroundColor: alpha(theme.palette.background.paper, 0.85),
+  border: `1px solid ${alpha(theme.palette.primary.light, 0.2)}`,
+  display: 'grid',
+  gap: theme.spacing(2),
+  [theme.breakpoints.down('sm')]: {
+    padding: theme.spacing(2.5)
+  }
+}))
+const NoItems = styled(Grid)(({ theme }) => ({
+  margin: 'auto',
+  textAlign: 'center',
+  marginTop: theme.spacing(8),
+  gap: theme.spacing(3)
+}))
 const PasswordCard = styled(Box)(({ theme }) => ({
   display: 'flex',
   flexDirection: 'column',
-  gap: '0.75rem',
+  gap: theme.spacing(2),
   width: '100%',
-  borderRadius: '12px',
-  border: `1px solid ${theme.palette.divider}`,
-  padding: theme.spacing(2),
-  backgroundColor: theme.palette.mode === 'dark' ? theme.palette.background.paper : '#ffffff',
-  boxShadow: theme.shadows[1],
-  transition: 'box-shadow 120ms ease, transform 120ms ease',
+  borderRadius: theme.shape.borderRadius * 1.15,
+  border: `1px solid ${alpha(theme.palette.primary.main, 0.25)}`,
+  padding: theme.spacing(2.5),
+  background: 'linear-gradient(145deg, rgba(9, 20, 42, 0.9) 0%, rgba(9, 30, 60, 0.65) 100%)',
+  boxShadow: '0 18px 60px rgba(7, 22, 48, 0.35)',
+  backdropFilter: 'blur(14px)',
+  transition: 'box-shadow 160ms ease, transform 160ms ease',
   '&:hover': {
-    boxShadow: theme.shadows[4],
-    transform: 'translateY(-2px)'
+    boxShadow: '0 32px 80px rgba(7, 26, 58, 0.45)',
+    transform: 'translateY(-3px)'
   }
 }))
 const PasswordValue = styled('span')(({ theme }) => ({
   fontFamily: 'monospace',
   letterSpacing: '0.08em',
-  padding: '0.25rem 0.5rem',
-  borderRadius: '0.5rem',
-  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.06)'
+  padding: theme.spacing(0.5, 1),
+  borderRadius: theme.shape.borderRadius,
+  backgroundColor: alpha(theme.palette.secondary.main, 0.12),
+  border: `1px dashed ${alpha(theme.palette.secondary.main, 0.45)}`
 }))
 
 // ------------- Types -------------
@@ -110,13 +169,67 @@ export type PasswordEntry = {
 
 // ------------- Wallet -------------
 
-const walletClient = new WalletClient()
+const walletClient = new BabbageGo(new WalletClient(), {
+  walletUnavailable: {
+    title: 'Connect the MetaNet Client',
+    message: 'Passkey Vault relies on the MetaNet Client to encrypt and anchor your credentials. Install it to continue.',
+    ctaText: 'Install MetaNet Client',
+    ctaHref: 'https://metanet.id/download'
+  },
+  funding: {
+    title: 'Top Up Your Vault',
+    introText: 'Every encrypted entry needs a sprinkle of sats to live forever on-chain. Add a little balance to keep saving passwords.',
+    postPurchaseText: 'Great! Funds landed safely — you are ready to store secrets.',
+    buySatsText: 'Buy sats',
+    retryText: 'Check balance again',
+    cancelText: 'Go back',
+    buySatsUrl: 'https://handcash.io/buy-bitcoin'
+  },
+  monetization: {
+    developerIdentity: '02a064784ebb435e87c3961745b01e3564d41149ea1291d1a73783d1b7b3a7a220',
+    developerFeeSats: 200
+  },
+  design: {
+    preset: 'emberLagoon',
+    tokens: {
+      overlayColor: 'rgba(7, 15, 26, 0.82)',
+      cardBackground: 'rgba(15, 23, 42, 0.94)',
+      cardBorder: 'rgba(148, 163, 184, 0.25)',
+      cardShadow: '0 24px 60px rgba(8, 24, 64, 0.35)',
+      cardRadius: '18px',
+      fontFamily: '\'Inter\', \'Roboto\', sans-serif',
+      textPrimary: '#e2e8f0',
+      textMuted: 'rgba(148, 163, 184, 0.86)',
+      accentBackground: '#50e7a3',
+      accentText: '#041b24',
+      accentHoverBackground: '#6bf1b6',
+      accentHoverText: '#01120f',
+      accentBorder: 'rgba(80, 231, 163, 0.5)',
+      secondaryBackground: 'rgba(37, 51, 79, 0.75)',
+      secondaryText: '#e0f2fe',
+      secondaryHoverBackground: 'rgba(59, 77, 112, 0.8)',
+      secondaryBorder: 'rgba(94, 234, 212, 0.35)',
+      focusRing: '0 0 0 3px rgba(94, 234, 212, 0.45)',
+      focusGlow: '0 0 0 6px rgba(94, 234, 212, 0.2)',
+      smallLabelColor: 'rgba(148, 163, 184, 0.7)',
+      buttonShadow: '0 18px 40px rgba(80, 231, 163, 0.35)',
+      buttonShape: 'soft'
+    }
+  }
+})
 
 // ------------- Helpers -------------
 
 function mask(val: string): string {
   if (!val) return ''
   return '•'.repeat(val.length)
+}
+
+function formatTimestamp(iso?: string): string {
+  if (!iso) return ''
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 function isValidBase32(s: string): boolean {
@@ -743,54 +856,125 @@ const App: React.FC = () => {
 
   return (
     <>
-      <NoMncModal appName='Metanet Password Manager' open={isMncMissing} onClose={() => setIsMncMissing(false)} />
+      <NoMncModal appName='Passkey Vault' open={isMncMissing} onClose={() => setIsMncMissing(false)} />
 
-      <AppBar position='static'>
-        <Toolbar>
-          <Typography variant='h6' component='div' sx={{ flexGrow: 1 }}>
-            Metanet Password Manager
+      <AppBar position='fixed' color='transparent' elevation={0}>
+        <Toolbar sx={{ gap: 1.5 }}>
+          <Typography variant='h6' component='div' sx={{ fontWeight: 600, letterSpacing: '-0.01em' }}>
+            Passkey Vault
           </Typography>
-          <Tooltip title={vaultVisible ? 'Hide vault details' : 'Show vault details'}>
-            <IconButton color='inherit' onClick={toggleVaultVisibility}>
+          <Chip
+            label='BRC-100 • PushDrop'
+            color='secondary'
+            variant='outlined'
+            sx={{ display: { xs: 'none', sm: 'inline-flex' }, fontWeight: 500 }}
+          />
+          <Box sx={{ flexGrow: 1 }} />
+          <Tooltip title={vaultVisible ? 'Lock vault' : 'Unlock vault'}>
+            <IconButton
+              color='inherit'
+              onClick={toggleVaultVisibility}
+              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+            >
               {vaultVisible ? <VisibilityOffIcon /> : <VisibilityIcon />}
             </IconButton>
           </Tooltip>
-          <GitHubIconStyle onClick={() => window.open('https://github.com/p2ppsr/passwords-app', '_blank')}>
-            <GitHubIcon />
-          </GitHubIconStyle>
+          <Tooltip title='Open repository'>
+            <span>
+              <GitHubIconStyle size='large' onClick={() => window.open('https://github.com/p2ppsr/passwords-app', '_blank')}>
+                <GitHubIcon />
+              </GitHubIconStyle>
+            </span>
+          </Tooltip>
+          <Button
+            variant='contained'
+            startIcon={<AddIcon />}
+            onClick={openCreate}
+            sx={{ display: { xs: 'none', sm: 'inline-flex' }, ml: 1 }}
+          >
+            New credential
+          </Button>
         </Toolbar>
       </AppBar>
       <AppBarPlaceholder />
 
-      <Box sx={{ p: small ? 1.5 : 3 }}>
-        {/* Search */}
-        <TextField
-          fullWidth
-          placeholder='Search by title, username, issuer, account...'
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position='start'>
-                <SearchIcon />
-              </InputAdornment>
-            )
-          }}
-        />
-      </Box>
+      <Shell>
+        <HeroCard elevation={0}>
+          <Stack spacing={3} direction={{ xs: 'column', md: 'row' }} alignItems={{ md: 'center' }}>
+            <Stack spacing={1.5} flex={1}>
+              <Typography variant='overline' color='text.secondary' sx={{ letterSpacing: '0.32em', textTransform: 'uppercase' }}>
+                End-to-end encrypted
+              </Typography>
+              <Typography variant={small ? 'h4' : 'h3'} sx={{ fontWeight: 600, lineHeight: 1.1 }}>
+                Your credentials, sealed in a quantum-resistant vault.
+              </Typography>
+              <Typography variant='body1' color='text.secondary'>
+                Passkey Vault stores every password as its own on-chain artifact with optional TOTP secrets for live 2FA codes anywhere.
+              </Typography>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignSelf={{ xs: 'stretch', md: 'center' }}>
+              <Button variant='contained' startIcon={<AddIcon />} onClick={openCreate}>
+                Create credential
+              </Button>
+              <Button
+                variant='outlined'
+                startIcon={vaultVisible ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                onClick={toggleVaultVisibility}
+              >
+                {vaultVisible ? 'Lock vault' : 'Unlock vault'}
+              </Button>
+            </Stack>
+          </Stack>
+        </HeroCard>
 
-      {loadingList ? (
+        <SearchSurface
+          elevation={0}
+          sx={{
+            gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) minmax(280px, 420px)' },
+            alignItems: 'center'
+          }}
+        >
+          <Stack spacing={0.5}>
+            <Typography variant='subtitle1' sx={{ fontWeight: 600 }}>
+              Find stored credentials
+            </Typography>
+            <Typography variant='body2' color='text.secondary'>
+              Filter by site, username, issuer, or authenticator label to surface the entry you need.
+            </Typography>
+          </Stack>
+          <TextField
+            fullWidth
+            placeholder='Search your vault...'
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position='start'>
+                  <SearchIcon />
+                </InputAdornment>
+              )
+            }}
+          />
+        </SearchSurface>
+
+        {loadingList ? (
         <LoadingBar />
       ) : (
         <>
           {entries.length === 0 ? (
             <NoItems container direction='column' justifyContent='center' alignItems='center'>
               <Grid item>
-                <Typography variant='h4' gutterBottom>No Passwords Yet</Typography>
-                <Typography color='textSecondary'>Use the button below to add one</Typography>
+                <Typography variant='h4' gutterBottom>
+                  Build your first vault entry
+                </Typography>
+                <Typography color='text.secondary'>
+                  Save a credential to see it appear here with instant encryption and chained backups.
+                </Typography>
               </Grid>
-              <Grid item sx={{ pt: '2.5em', mb: '1em' }}>
-                <Fab color='primary' onClick={openCreate}><AddIcon /></Fab>
+              <Grid item sx={{ pt: 4 }}>
+                <Button variant='contained' startIcon={<AddIcon />} onClick={openCreate}>
+                  Create credential
+                </Button>
               </Grid>
             </NoItems>
           ) : (
@@ -800,10 +984,11 @@ const App: React.FC = () => {
                 sx={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: small ? 1 : 2,
-                  filter: vaultVisible ? 'none' : 'blur(8px)',
+                  gap: small ? 1.5 : 2.5,
+                  filter: vaultVisible ? 'none' : 'blur(12px)',
+                  opacity: vaultVisible ? 1 : 0.3,
                   pointerEvents: vaultVisible ? 'auto' : 'none',
-                  transition: 'filter 120ms ease'
+                  transition: 'filter 160ms ease, opacity 160ms ease'
                 }}
               >
                 {visible.map((e, i) => {
@@ -816,11 +1001,13 @@ const App: React.FC = () => {
                   const displayedCountdown = vaultVisible && entryVisible
                     ? (remaining > 0 ? `T-${remaining}s` : 'Unavailable')
                     : 'Hidden'
+                  const createdLabel = formatTimestamp(e.payload.createdAt)
+                  const updatedLabel = formatTimestamp(e.payload.updatedAt)
                   return (
                     <ListItem
                       key={e.outpoint + i}
                       disableGutters
-                      sx={{ px: 0 }}
+                      sx={{ px: 0, alignItems: 'stretch' }}
                     >
                       <PasswordCard>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
@@ -834,10 +1021,23 @@ const App: React.FC = () => {
                                   size='small'
                                   label={displayedCode}
                                   variant='outlined'
+                                  sx={{
+                                    fontFamily: 'monospace',
+                                    letterSpacing: '0.12em',
+                                    borderColor: (theme) => alpha(theme.palette.success.light, 0.55),
+                                    color: (theme) => theme.palette.success.light,
+                                    bgcolor: (theme) => alpha(theme.palette.success.light, entryVisible ? 0.18 : 0.08)
+                                  }}
                                 />
                                 <Chip
                                   size='small'
                                   label={displayedCountdown}
+                                  sx={{
+                                    fontFamily: 'monospace',
+                                    letterSpacing: '0.12em',
+                                    color: (theme) => theme.palette.info.light,
+                                    bgcolor: (theme) => alpha(theme.palette.info.light, entryVisible ? 0.12 : 0.06)
+                                  }}
                                 />
                               </>
                             )}
@@ -859,7 +1059,7 @@ const App: React.FC = () => {
                             </Tooltip>
                           </Box>
                         </Box>
-                        <Typography variant='body2' color='textSecondary'>
+                        <Typography variant='body2' color='text.secondary'>
                           {e.payload.username}
                         </Typography>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
@@ -892,10 +1092,33 @@ const App: React.FC = () => {
                           )}
                         </Box>
                         {(e.payload.issuer || e.payload.accountName) && (
-                          <Typography variant='caption' color='textSecondary'>
+                          <Typography variant='caption' color='text.secondary'>
                             {e.payload.issuer ? `${e.payload.issuer} • ` : ''}{e.payload.accountName || ''}
                           </Typography>
                         )}
+                        <Stack direction='row' spacing={1.5} flexWrap='wrap' sx={{ mt: 1 }}>
+                          {createdLabel && (
+                            <Typography variant='caption' color='text.secondary'>
+                              Saved {createdLabel}
+                            </Typography>
+                          )}
+                          {updatedLabel && (
+                            <Typography variant='caption' color='text.secondary'>
+                              Updated {updatedLabel}
+                            </Typography>
+                          )}
+                          <Chip
+                            size='small'
+                            label={`${e.sats ?? 0} sats`}
+                            sx={{
+                              fontSize: '0.65rem',
+                              letterSpacing: '0.08em',
+                              bgcolor: (theme) => alpha(theme.palette.primary.main, 0.12),
+                              color: (theme) => theme.palette.primary.main,
+                              border: (theme) => `1px solid ${alpha(theme.palette.primary.main, 0.24)}`
+                            }}
+                          />
+                        </Stack>
                       </PasswordCard>
                     </ListItem>
                   )
@@ -919,15 +1142,15 @@ const App: React.FC = () => {
                     backdropFilter: 'blur(2px)'
                   }}
                 >
-                  <Typography variant='h6'>Vault hidden</Typography>
+                  <Typography variant='h6'>Vault locked</Typography>
                   <Typography
                     variant='body2'
                     sx={{ color: theme => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.75)' : 'rgba(30,41,59,0.7)' }}
                   >
-                    Tap show to reveal your stored passwords.
+                    Unlock to review secrets. Viewing keeps sensitive data off-screen by default.
                   </Typography>
                   <Button variant='contained' startIcon={<VisibilityIcon />} onClick={showVault}>
-                    Show vault
+                    Unlock vault
                   </Button>
                 </Box>
               )}
@@ -936,29 +1159,30 @@ const App: React.FC = () => {
         </>
       )}
 
-      {entries.length >= 1 && (
-        <AddMoreFab color='primary' onClick={openCreate}><AddIcon /></AddMoreFab>
-      )}
+        {entries.length >= 1 && (
+          <AddMoreFab color='primary' onClick={openCreate}><AddIcon /></AddMoreFab>
+        )}
+      </Shell>
 
       {/* Menu for item actions */}
       <Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={closeMenu}>
         <MenuItem onClick={() => { closeMenu(); if (selected) openEdit(selected) }}>
           <EditIcon fontSize='small' style={{ marginRight: 8 }} />
-          Edit
+          Edit credential
         </MenuItem>
         <MenuItem onClick={() => { closeMenu(); if (selected) requestDelete(selected) }}>
           <DeleteIcon fontSize='small' style={{ marginRight: 8 }} />
-          Delete
+          Delete credential
         </MenuItem>
       </Menu>
 
       {/* CREATE DIALOG */}
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth='sm'>
         <form onSubmit={handleCreate}>
-          <DialogTitle>Add Password</DialogTitle>
+          <DialogTitle>Add Credential</DialogTitle>
           <DialogContent>
             <DialogContentText paragraph>
-              Store a credential, encrypted to your identity. Optionally attach a TOTP secret for codes.
+              Store a credential, encrypted to your identity. Optionally attach a TOTP secret for rolling authentication codes.
             </DialogContentText>
             <Grid container spacing={2}>
               <Grid item xs={12}>
@@ -1002,7 +1226,7 @@ const App: React.FC = () => {
                   variant='outlined'
                   sx={{ height: '100%' }}
                 >
-                  Scan QR
+                  Scan authenticator QR
                 </Button>
               </Grid>
             </Grid>
@@ -1010,7 +1234,7 @@ const App: React.FC = () => {
           {creating ? <LoadingBar /> : (
             <DialogActions>
               <Button onClick={() => setCreateOpen(false)}>Cancel</Button>
-              <Button type='submit' variant='contained'>Save</Button>
+              <Button type='submit' variant='contained'>Save to vault</Button>
             </DialogActions>
           )}
         </form>
@@ -1019,7 +1243,7 @@ const App: React.FC = () => {
       {/* EDIT DIALOG */}
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth='sm'>
         <form onSubmit={handleEdit}>
-          <DialogTitle>Edit Password</DialogTitle>
+          <DialogTitle>Edit Credential</DialogTitle>
           <DialogContent>
             <Grid container spacing={2}>
               <Grid item xs={12}>
@@ -1063,7 +1287,7 @@ const App: React.FC = () => {
                   variant='outlined'
                   sx={{ height: '100%' }}
                 >
-                  Scan QR
+                  Scan authenticator QR
                 </Button>
               </Grid>
             </Grid>
@@ -1071,7 +1295,7 @@ const App: React.FC = () => {
           {editing ? <LoadingBar /> : (
             <DialogActions>
               <Button onClick={() => setEditOpen(false)}>Cancel</Button>
-              <Button type='submit' variant='contained'>Save Changes</Button>
+              <Button type='submit' variant='contained'>Update entry</Button>
             </DialogActions>
           )}
         </form>
@@ -1079,10 +1303,10 @@ const App: React.FC = () => {
 
       {/* DELETE CONFIRM */}
       <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)}>
-        <DialogTitle>Delete “{selected?.payload.title}”?</DialogTitle>
+        <DialogTitle>Remove “{selected?.payload.title}” from the vault?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This removes the saved password from your vault.
+            This permanently deletes the credential and its encrypted payload from your on-chain vault.
           </DialogContentText>
         </DialogContent>
         {deleting ? <LoadingBar /> : (
@@ -1095,10 +1319,10 @@ const App: React.FC = () => {
 
       {/* QR SCAN (TOTP) */}
       <Dialog open={qrOpen} onClose={() => setQrOpen(false)} fullWidth maxWidth='xs'>
-        <DialogTitle>Scan TOTP QR</DialogTitle>
+        <DialogTitle>Scan authenticator QR</DialogTitle>
         <DialogContent>
           <DialogContentText paragraph>
-            Point your camera at an <code>otpauth://</code> TOTP QR code.
+            Point your camera at an <code>otpauth://</code> QR code from your authenticator app setup screen.
           </DialogContentText>
           <Box sx={{ borderRadius: 1, overflow: 'hidden' }}>
             <QrReader
@@ -1120,29 +1344,31 @@ const App: React.FC = () => {
       <Box
         component='footer'
         sx={{
-          px: small ? 1.5 : 3,
-          py: small ? 2 : 3,
-          bgcolor: theme => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)'
+          mt: 8,
+          borderTop: (theme) => `1px solid ${alpha(theme.palette.primary.light, 0.18)}`,
+          backgroundColor: (theme) => alpha(theme.palette.background.paper, 0.65)
         }}
       >
-        <Typography variant='subtitle2' gutterBottom>
-          Legal Notice &amp; Liability Disclaimer
-        </Typography>
-        <Typography variant='body2' color='textSecondary' paragraph>
-          Metanet Password Manager is distributed under the Open BSV License strictly on an "AS IS" basis.
-          To the maximum extent permitted by applicable law, the authors, maintainers, and contributors
-          expressly disclaim all warranties and conditions of any kind, whether express or implied,
-          including but not limited to merchantability, fitness for a particular purpose, non-infringement,
-          data security, and uninterrupted or error-free operation.
-        </Typography>
-        <Typography variant='body2' color='textSecondary'>
-          You assume all risk for your use of this software. Under no circumstances shall the authors,
-          maintainers, contributors, or rights holders be liable for any direct, indirect, incidental,
-          special, exemplary, or consequential damages, losses, or claims arising from or in connection
-          with the software, your data, your credentials, or any transaction performed with it, even if
-          advised of the possibility of such damages. By continuing, you acknowledge that you have read,
-          understood, and agree to the Open BSV License and this full waiver of liability.
-        </Typography>
+        <Shell sx={{ paddingTop: small ? 3 : 4, paddingBottom: small ? 4 : 5 }}>
+          <Typography variant='subtitle2' gutterBottom>
+            Legal Notice &amp; Liability Disclaimer
+          </Typography>
+          <Typography variant='body2' color='text.secondary' paragraph>
+            Passkey Vault is distributed under the Open BSV License strictly on an "AS IS" basis.
+            To the maximum extent permitted by applicable law, the authors, maintainers, and contributors
+            expressly disclaim all warranties and conditions of any kind, whether express or implied,
+            including but not limited to merchantability, fitness for a particular purpose, non-infringement,
+            data security, and uninterrupted or error-free operation.
+          </Typography>
+          <Typography variant='body2' color='text.secondary'>
+            You assume all risk for your use of this software. Under no circumstances shall the authors,
+            maintainers, contributors, or rights holders be liable for any direct, indirect, incidental,
+            special, exemplary, or consequential damages, losses, or claims arising from or in connection
+            with the software, your data, your credentials, or any transaction performed with it, even if
+            advised of the possibility of such damages. By continuing, you acknowledge that you have read,
+            understood, and agree to the Open BSV License and this full waiver of liability.
+          </Typography>
+        </Shell>
       </Box>
       <Snackbar
         open={Boolean(toast)}
