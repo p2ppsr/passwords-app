@@ -33,8 +33,6 @@ import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import SearchIcon from '@mui/icons-material/Search'
 
-import useAsyncEffect from 'use-async-effect'
-import { NoMncModal, checkForMetaNetClient } from 'metanet-react-prompt'
 import {
   WalletClient, PushDrop, Utils, Transaction, LockingScript,
   type WalletOutput, type WalletProtocol,
@@ -328,8 +326,6 @@ function parseOtpauth(uri: string): Partial<PasswordPayload> | null {
 
 const App: React.FC = () => {
   // MNC presence
-  const [isMncMissing, setIsMncMissing] = useState<boolean>(false)
-
   // Loading flags
   const [loadingList, setLoadingList] = useState<boolean>(true)
   const [creating, setCreating] = useState<boolean>(false)
@@ -457,20 +453,6 @@ const App: React.FC = () => {
 
     return () => { cancelled = true }
   }, [entries, tick])
-
-  // Poll for MetaNet Client (same as your ToDo app)
-  useAsyncEffect(() => {
-    const id = setInterval(() => {
-      checkForMetaNetClient().then(hasMNC => {
-        if (hasMNC === 0) setIsMncMissing(true)
-        else {
-          setIsMncMissing(false)
-          clearInterval(id)
-        }
-      }).catch(err => console.error('Error checking MetaNet Client:', err))
-    }, 1000)
-    return () => clearInterval(id)
-  }, [])
 
   // ----- List / Load -----
 
@@ -856,8 +838,6 @@ const App: React.FC = () => {
 
   return (
     <>
-      <NoMncModal appName='Passkey Vault' open={isMncMissing} onClose={() => setIsMncMissing(false)} />
-
       <AppBar position='fixed' color='transparent' elevation={0}>
         <Toolbar sx={{ gap: 1.5 }}>
           <Typography variant='h6' component='div' sx={{ fontWeight: 600, letterSpacing: '-0.01em' }}>
@@ -906,7 +886,7 @@ const App: React.FC = () => {
                 End-to-end encrypted
               </Typography>
               <Typography variant={small ? 'h4' : 'h3'} sx={{ fontWeight: 600, lineHeight: 1.1 }}>
-                Your credentials, sealed in a quantum-resistant vault.
+                Your credentials, sealed in a chain-backed vault.
               </Typography>
               <Typography variant='body1' color='text.secondary'>
                 Passkey Vault stores every password as its own on-chain artifact with optional TOTP secrets for live 2FA codes anywhere.
