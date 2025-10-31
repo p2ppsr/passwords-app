@@ -169,10 +169,9 @@ export type PasswordEntry = {
 
 const walletClient = new BabbageGo(new WalletClient(), {
   walletUnavailable: {
-    title: 'Connect the MetaNet Client',
-    message: 'Passkey Vault relies on the MetaNet Client to encrypt and anchor your credentials. Install it to continue.',
-    ctaText: 'Install MetaNet Client',
-    ctaHref: 'https://metanet.id/download'
+    title: 'Connect a Metanet Client',
+    message: 'Passkey Vault relies on the Metanet to encrypt and anchor your credentials. Install it to continue.',
+    ctaText: 'Install Metanet Client',
   },
   funding: {
     title: 'Top Up Your Vault',
@@ -180,8 +179,7 @@ const walletClient = new BabbageGo(new WalletClient(), {
     postPurchaseText: 'Great! Funds landed safely — you are ready to store secrets.',
     buySatsText: 'Buy sats',
     retryText: 'Check balance again',
-    cancelText: 'Go back',
-    buySatsUrl: 'https://handcash.io/buy-bitcoin'
+    cancelText: 'Go back'
   },
   monetization: {
     developerIdentity: '02a064784ebb435e87c3961745b01e3564d41149ea1291d1a73783d1b7b3a7a220',
