@@ -15,13 +15,13 @@
   "author": "Tys-MacBook-Pro.local",
   "license": "SEE LICENSE IN LICENSE.txt",
   "devDependencies": {
+    "@p2ppsr/cars-cli": "^1.2.13",
+    "@p2ppsr/lars": "^1.5.11",
     "@vitejs/plugin-react": "^4.5.1",
     "sass-embedded": "^1.89.1",
-    "vite": "^5.4.19",
-    "@p2ppsr/cars-cli": "^1.2.13",
-    "@p2ppsr/lars": "^1.5.11"
+    "vite": "^5.4.19"
   },
   "dependencies": {
-    "@bsv/sdk": "^1.6.1"
+    "@bsv/sdk": "^2.4.0"
   }
 }
